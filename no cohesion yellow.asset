@@ -1,0 +1,31 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b9248bcb813e5aa4d8c2a422917a0a5c, type: 3}
+  m_Name: no cohesion yellow
+  m_EditorClassIdentifier: 
+  name: no cohesion yellow
+  spawnMode: 1
+  NumberOfAgents: 65535
+  AgentMovementSpeed: 30
+  DecayRate: 1
+  DiffuseRate: 30
+  RunSense: 1
+  SenseOffsetDist: 10
+  SensorSize: 0.1
+  sensorAngleSpacing: 10
+  TurnSpeed: 5
+  width: 1920
+  height: 1080
+  red: 1
+  blue: 0
+  green: 1
+  alpha: 1

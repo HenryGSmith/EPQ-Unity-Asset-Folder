@@ -1,0 +1,183 @@
+// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel Update
+
+
+float DeltaTime;
+float time;
+
+uint numAgents;
+float moveSpeed;
+
+uint width;
+uint height;
+
+// sensing settings
+bool RunSense;
+float SenseOffsetDist;
+float SensorSize;
+float sensorAngleSpacing;
+float TurnSpeed;
+
+const float PI = 3.1415;
+
+uint hash(uint state)
+{
+    state ^= 2747636419u;
+    state *= 2654435769u;
+    state ^= state >> 16;
+    state *= 2654435769u;
+    state ^= state >> 16;
+    state *= 2654435769u;
+    return state;
+}
+
+float scaleToRange01(uint state)
+{
+    return state / 4294967295.0;
+}
+
+
+struct Agent {
+    float2 position;
+    float angle;
+};
+
+RWStructuredBuffer<Agent> agents;
+RWTexture2D<float4> TrailMap;
+
+float Sense(Agent agent, float SensorAngleOffset) {
+    float SensorAngle = agent.angle + SensorAngleOffset;
+    float2 SensorDir = float2(cos(SensorAngle), sin(SensorAngle));
+    int2 SensorPos = agent.position + SensorDir * SenseOffsetDist;
+
+    int sensorCentreX = (int)SensorPos.x;
+    int sensorCentreY = (int)SensorPos.y;
+
+    float sum = 0;
+
+    for (int offsetX = -SensorSize; offsetX <= SensorSize; offsetX++) {
+        for (int offsetY = -SensorSize; offsetY <= SensorSize; offsetY++) {
+            
+            int sampleX = min(width - 1, max(0, sensorCentreX + offsetX));
+            int sampleY = min(height - 1, max(0, sensorCentreY + offsetY));
+            sum += TrailMap[int2(sampleX, sampleY)];
+        }
+    }
+
+    return sum;
+}
+
+[numthreads(16,1,1)]
+void Update (uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= numAgents) { return; }
+
+    Agent agent = agents[id.x];
+
+    float2 pos = agent.position;
+    uint random = hash(pos.y * width + pos.x + hash(id.x + time * 100000));
+
+    if (RunSense) {
+        // sensing
+        float WeightForward = Sense(agent, 0);
+        float WeightLeft = Sense(agent, sensorAngleSpacing);
+        float WeightRight = Sense(agent, -sensorAngleSpacing);
+
+        float randomSteerStrength = scaleToRange01(random);
+
+        //continue in same dir
+        if (WeightForward > WeightLeft && WeightForward > WeightRight) {
+            agents[id.x].angle += 0;
+        }
+        //turn randomly
+        else if (WeightForward < WeightLeft && WeightForward < WeightRight) {
+            agents[id.x].angle += (randomSteerStrength - 0.5) * 2 * TurnSpeed * DeltaTime;
+        }
+        // turn right
+        else if (WeightRight > WeightLeft) {
+            agents[id.x].angle -= randomSteerStrength * TurnSpeed * DeltaTime;
+        }
+        // turn left
+        else if (WeightLeft > WeightRight) {
+            agents[id.x].angle += randomSteerStrength * TurnSpeed * DeltaTime;
+        }
+    }
+
+    float2 direction = float2(cos(agent.angle), sin(agent.angle));
+    float2 newPos = agent.position + direction * moveSpeed * DeltaTime;
+
+    if (newPos.x < 0 || newPos.x >= width || newPos.y < 0 || newPos.y >= height) {
+        random = hash(random);
+        float randomAngle = scaleToRange01(random) * 2 * 3.1415;
+
+        newPos.x = min(width - 1, max(0, newPos.x));
+        newPos.y = min(height - 1, max(0, newPos.y));
+        agents[id.x].angle = randomAngle;
+    }
+
+    agents[id.x].position = newPos;
+    int cellX = (int)agent.position.x;
+    int cellY = (int)agent.position.y;
+    TrailMap[int2(cellX, cellY)] = 1;
+}
+
+//------------------------------------------------------------------------
+#pragma kernel Diffuse
+
+float DecayRate;
+float DiffuseRate;
+
+RWTexture2D<float4> DiffusedTrailMap;
+ 
+[numthreads(8, 8, 1)]
+void Diffuse(uint3 id : SV_DispatchThreadID) {
+    if (id.x < 0 || id.x >= (uint)width || id.y < 0 || id.y >= (uint)height) {
+        return;
+    }
+
+    float4 sum = 0;
+    float4 originalCol = TrailMap[id.xy];
+
+    for (int offsetX = -1; offsetX <= 1; offsetX ++) {
+		for (int offsetY = -1; offsetY <= 1; offsetY ++) {
+			int sampleX = min(width-1, max(0, id.x + offsetX));
+			int sampleY = min(height-1, max(0, id.y + offsetY));
+			sum += TrailMap[int2(sampleX,sampleY)];
+		}
+	}
+
+    float4 blurredCol = sum / 9;
+    float diffuseWeight = saturate(DiffuseRate * DeltaTime);
+
+    blurredCol = originalCol * (1 - diffuseWeight) + blurredCol * (diffuseWeight);
+
+    DiffusedTrailMap[id.xy] = max(0, blurredCol - DecayRate * DeltaTime);
+}
+
+//-------------------------------------------------------------------------------------
+
+#pragma kernel ReColour
+
+RWTexture2D<float4> InputMap;
+RWTexture2D<float4> ColouredMap;
+
+float4 x;
+float4 y;
+float4 z;
+float4 w;
+
+[numthreads(8, 8, 1)]
+void ReColour(uint3 id : SV_DispatchThreadID) {
+    if (id.x < 0 || id.x >= (uint)width || id.y < 0 || id.y >= (uint)height) {
+        return;
+    }
+
+    float4 colour = InputMap[id.xy];
+
+    float red   = dot(colour, x);
+    float green = dot(colour, y);
+    float blue  = dot(colour, z);
+    float alpha = dot(colour, w);
+
+    ColouredMap[id.xy] = float4(red, green, blue, alpha);
+}
